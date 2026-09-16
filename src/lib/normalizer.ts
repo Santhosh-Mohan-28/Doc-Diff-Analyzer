@@ -56,8 +56,8 @@ function parsePeriod(text: string): string | undefined {
 // Percentage normalization
 // ---------------------------------------------------------------------------
 
-const PERCENTAGE_RE = /([0-9]+(?:\.[0-9]+)?)\s*(?:%|percent(?:age)?|per\s+cent)\b/i;
-
+const PERCENTAGE_RE =
+  /([0-9]+(?:\.[0-9]+)?)\s*(?:%|percent(?:age)?|per\s+cent)(?!\w)/i;
 function parsePercentage(text: string): number | undefined {
   const m = PERCENTAGE_RE.exec(text);
   if (!m) return undefined;

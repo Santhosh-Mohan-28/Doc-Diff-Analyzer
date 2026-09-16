@@ -4,27 +4,27 @@ import { useState } from "react";
 import type { DifferenceItem, PresentationHint } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Configuration
 // ---------------------------------------------------------------------------
 
 const TYPE_CONFIG = {
   changed: {
     badge: "Changed",
-    badgeClass: "bg-amber-100 text-amber-700 border-amber-200",
-    borderClass: "border-l-amber-400",
-    icon: "⟷",
+    badgeClass: "border-amber-200 bg-amber-50 text-amber-700",
+    accentClass: "bg-amber-400",
+    iconClass: "bg-amber-50 text-amber-600",
   },
   new: {
     badge: "New",
-    badgeClass: "bg-green-100 text-green-700 border-green-200",
-    borderClass: "border-l-green-400",
-    icon: "+",
+    badgeClass: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    accentClass: "bg-emerald-500",
+    iconClass: "bg-emerald-50 text-emerald-600",
   },
   removed: {
     badge: "Removed",
-    badgeClass: "bg-red-100 text-red-700 border-red-200",
-    borderClass: "border-l-red-400",
-    icon: "−",
+    badgeClass: "border-red-200 bg-red-50 text-red-700",
+    accentClass: "bg-red-500",
+    iconClass: "bg-red-50 text-red-600",
   },
 } as const;
 
@@ -33,12 +33,189 @@ const HINT_LABELS: Record<PresentationHint, string> = {
   "policy-change": "Policy",
   "condition-change": "Condition",
   "procedure-change": "Procedure",
-  "new-item": "New",
-  "removed-item": "Removed",
+  "new-item": "New item",
+  "removed-item": "Removed item",
   "multi-change": "Multiple",
   "date-change": "Date",
   "definition-change": "Definition",
 };
+
+// ---------------------------------------------------------------------------
+// Icons
+// ---------------------------------------------------------------------------
+
+function ChangeIcon({ type }: { type: DifferenceItem["type"] }) {
+  if (type === "changed") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        className="h-5 w-5"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M7 7h10M17 7l-3-3M17 7l-3 3M17 17H7M7 17l3-3M7 17l3 3"
+        />
+      </svg>
+    );
+  }
+
+  if (type === "new") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        className="h-5 w-5"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M12 5v14M5 12h14"
+        />
+      </svg>
+    );
+  }
+
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      className="h-5 w-5"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M6 12h12"
+      />
+    </svg>
+  );
+}
+
+function ChevronIcon({ expanded }: { expanded: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      className={`h-4 w-4 transition-transform duration-200 ${
+        expanded ? "rotate-180" : ""
+      }`}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="m5 7.5 5 5 5-5"
+      />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      className="h-3.5 w-3.5"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="m4.5 10 3.2 3.2L15.5 5.5"
+      />
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Source block
+// ---------------------------------------------------------------------------
+
+function SourceBlock({
+  label,
+  content,
+  value,
+  source,
+  variant,
+}: {
+  label: string;
+  content: string;
+  value?: string;
+  source?: {
+    page: number;
+    section?: string;
+  };
+  variant: "previous" | "current";
+}) {
+  const isPrevious = variant === "previous";
+
+  return (
+    <div
+      className={`relative overflow-hidden rounded-2xl border p-5 ${
+        isPrevious
+          ? "border-red-100 bg-red-50/50"
+          : "border-emerald-100 bg-emerald-50/50"
+      }`}
+    >
+      {/* Side accent */}
+      <div
+        className={`absolute left-0 top-0 h-full w-1 ${
+          isPrevious ? "bg-red-400" : "bg-emerald-500"
+        }`}
+      />
+
+      <div className="flex items-center justify-between gap-3">
+        <div
+          className={`text-[10px] font-bold uppercase tracking-[0.14em] ${
+            isPrevious ? "text-red-500" : "text-emerald-600"
+          }`}
+        >
+          {label}
+        </div>
+
+        {source && (
+          <span
+            className={`rounded-full border px-2 py-1 text-[10px] font-medium ${
+              isPrevious
+                ? "border-red-100 bg-white/60 text-red-400"
+                : "border-emerald-100 bg-white/60 text-emerald-500"
+            }`}
+          >
+            Page {source.page}
+            {source.section ? ` · ${source.section}` : ""}
+          </span>
+        )}
+      </div>
+
+      {value && (
+        <p
+          className={`mt-4 text-base font-semibold ${
+            isPrevious ? "text-red-800" : "text-emerald-800"
+          }`}
+        >
+          {value}
+        </p>
+      )}
+
+      <p
+        className={`mt-2 text-sm leading-6 ${
+          isPrevious ? "text-red-700/80" : "text-emerald-700/80"
+        }`}
+      >
+        {content}
+      </p>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -50,102 +227,142 @@ interface Props {
 
 export default function DifferenceCard({ item }: Props) {
   const [expanded, setExpanded] = useState(true);
+
   const config = TYPE_CONFIG[item.type];
   const hintLabel = HINT_LABELS[item.presentationHint];
+  const confidence = Math.round(item.confidence * 100);
 
   return (
-    <article
-      className={`rounded-xl border border-gray-200 border-l-4 ${config.borderClass} bg-white shadow-sm overflow-hidden`}
-    >
-      {/* Header */}
+    <article className="group relative overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition-all duration-300 hover:shadow-lg hover:shadow-slate-900/[0.04]">
+      {/* Type accent */}
       <div
-        className="flex items-start justify-between gap-4 px-5 py-4 cursor-pointer select-none"
+        className={`absolute left-0 top-0 h-full w-1 ${config.accentClass}`}
+      />
+
+      {/* Header */}
+      <button
+        type="button"
+        className="flex w-full items-start justify-between gap-4 px-5 py-5 text-left sm:px-6"
         onClick={() => setExpanded((e) => !e)}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setExpanded((x) => !x); }}
         aria-expanded={expanded}
       >
-        <div className="flex items-center gap-2 flex-wrap min-w-0">
-          {/* Type badge */}
-          <span
-            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${config.badgeClass} shrink-0`}
+        <div className="flex min-w-0 items-start gap-3.5">
+          {/* Type icon */}
+          <div
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${config.iconClass}`}
           >
-            <span>{config.icon}</span>
-            {config.badge}
-          </span>
-          {/* Hint label */}
-          <span className="text-xs text-gray-400 border border-gray-200 rounded px-1.5 py-0.5 shrink-0">
-            {hintLabel}
-          </span>
-          {/* Topic */}
-          <h3 className="text-sm font-semibold text-gray-800 truncate">{item.topic}</h3>
+            <ChangeIcon type={item.type} />
+          </div>
+
+          <div className="min-w-0 pt-0.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${config.badgeClass}`}
+              >
+                {config.badge}
+              </span>
+
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-medium text-slate-500">
+                {hintLabel}
+              </span>
+            </div>
+
+            <h3 className="mt-2.5 truncate text-sm font-semibold text-slate-900 sm:text-base">
+              {item.topic}
+            </h3>
+          </div>
         </div>
 
-        <div className="flex items-center gap-3 shrink-0">
-          {/* AI / deterministic badge */}
-          {item.comparisonMethod === "ai-assisted" && (
-            <span className="text-xs text-blue-400 hidden sm:inline">AI</span>
-          )}
+        <div className="flex shrink-0 items-center gap-3 pt-1">
           {/* Confidence */}
-          <span className="text-xs text-gray-300 hidden sm:inline">
-            {Math.round(item.confidence * 100)}%
+          <div className="hidden text-right sm:block">
+            <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-400">
+              Confidence
+            </p>
+            <p className="mt-0.5 text-xs font-semibold text-slate-600">
+              {confidence}%
+            </p>
+          </div>
+
+          {/* Method */}
+          {item.comparisonMethod === "ai-assisted" && (
+            <span className="hidden rounded-full border border-indigo-100 bg-indigo-50 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-indigo-500 md:inline-flex">
+              AI assisted
+            </span>
+          )}
+
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-50 text-slate-400 transition-colors group-hover:bg-slate-100">
+            <ChevronIcon expanded={expanded} />
           </span>
-          {/* Expand toggle */}
-          <span className="text-gray-400 text-xs">{expanded ? "▲" : "▼"}</span>
         </div>
-      </div>
+      </button>
 
       {/* Body */}
       {expanded && (
-        <div className="px-5 pb-5 space-y-4 border-t border-gray-100">
+        <div className="border-t border-slate-100 px-5 pb-6 pt-5 sm:px-6">
           {/* Explanation */}
-          <p className="text-sm text-gray-700 leading-relaxed pt-3">{item.explanation}</p>
+          <div className="mb-5">
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
+              What changed
+            </p>
 
-          {/* Before/After blocks */}
+            <p className="mt-2 text-sm leading-7 text-slate-600">
+              {item.explanation}
+            </p>
+          </div>
+
+          {/* Previous / Current */}
           {(item.previous || item.current) && (
             <div
-              className={`grid gap-3 ${
-                item.previous && item.current ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"
+              className={`grid gap-4 ${
+                item.previous && item.current
+                  ? "grid-cols-1 lg:grid-cols-2"
+                  : "grid-cols-1"
               }`}
             >
               {item.previous && (
-                <div className="rounded-lg bg-red-50 border border-red-100 p-3 space-y-1">
-                  <p className="text-xs font-semibold text-red-500 uppercase tracking-wide">
-                    Previous
-                  </p>
-                  {item.previous.value && (
-                    <p className="text-sm font-bold text-red-700">{item.previous.value}</p>
-                  )}
-                  <p className="text-xs text-red-600 leading-relaxed">{item.previous.content}</p>
-                  {item.previous.source && (
-                    <p className="text-xs text-red-300 mt-1">
-                      Page {item.previous.source.page}
-                      {item.previous.source.section ? ` · ${item.previous.source.section}` : ""}
-                    </p>
-                  )}
-                </div>
+                <SourceBlock
+                  label="Previous version"
+                  content={item.previous.content}
+                  value={item.previous.value}
+                  source={item.previous.source}
+                  variant="previous"
+                />
               )}
 
               {item.current && (
-                <div className="rounded-lg bg-green-50 border border-green-100 p-3 space-y-1">
-                  <p className="text-xs font-semibold text-green-600 uppercase tracking-wide">
-                    Current
-                  </p>
-                  {item.current.value && (
-                    <p className="text-sm font-bold text-green-700">{item.current.value}</p>
-                  )}
-                  <p className="text-xs text-green-700 leading-relaxed">{item.current.content}</p>
-                  {item.current.source && (
-                    <p className="text-xs text-green-400 mt-1">
-                      Page {item.current.source.page}
-                      {item.current.source.section ? ` · ${item.current.source.section}` : ""}
-                    </p>
-                  )}
-                </div>
+                <SourceBlock
+                  label="Current version"
+                  content={item.current.content}
+                  value={item.current.value}
+                  source={item.current.source}
+                  variant="current"
+                />
               )}
             </div>
           )}
+
+          {/* Footer metadata */}
+          <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-slate-100 pt-4">
+            <div className="flex items-center gap-1.5 text-[10px] font-medium text-slate-400">
+              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-50 text-emerald-500">
+                <CheckIcon />
+              </span>
+              Evidence validated
+            </div>
+
+            <div className="h-3 w-px bg-slate-200" />
+
+            <span className="text-[10px] text-slate-400">
+              {item.comparisonMethod === "ai-assisted"
+                ? "Semantic + AI comparison"
+                : "Deterministic comparison"}
+            </span>
+
+            <span className="ml-auto text-[10px] font-medium text-slate-400">
+              {confidence}% confidence
+            </span>
+          </div>
         </div>
       )}
     </article>

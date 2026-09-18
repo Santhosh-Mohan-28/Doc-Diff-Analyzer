@@ -43,19 +43,27 @@ const FILTER_STYLES: Record<
 export default function ComparisonView({ differences }: Props) {
   const [filter, setFilter] = useState<FilterType>("all");
 
+  // Only meaningful differences are shown in the report.
+  const meaningfulDifferences = differences.filter(
+    (d) =>
+      d.type === "changed" ||
+      d.type === "new" ||
+      d.type === "removed"
+  );
+
   const counts: Record<FilterType, number> = {
-    all: differences.length,
-    changed: differences.filter((d) => d.type === "changed").length,
-    new: differences.filter((d) => d.type === "new").length,
-    removed: differences.filter((d) => d.type === "removed").length,
+    all: meaningfulDifferences.length,
+    changed: meaningfulDifferences.filter((d) => d.type === "changed").length,
+    new: meaningfulDifferences.filter((d) => d.type === "new").length,
+    removed: meaningfulDifferences.filter((d) => d.type === "removed").length,
   };
 
   const visible =
     filter === "all"
-      ? differences
-      : differences.filter((d) => d.type === filter);
+      ? meaningfulDifferences
+      : meaningfulDifferences.filter((d) => d.type === filter);
 
-  if (differences.length === 0) {
+  if (meaningfulDifferences.length === 0) {
     return (
       <div className="relative overflow-hidden rounded-3xl border border-emerald-100 bg-white shadow-lg shadow-slate-900/[0.03]">
         <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-400 to-teal-400" />
@@ -154,9 +162,7 @@ export default function ComparisonView({ differences }: Props) {
                         ? "bg-amber-400"
                         : f === "new"
                           ? "bg-emerald-500"
-                          : f === "removed"
-                            ? "bg-red-500"
-                            : "bg-slate-400"
+                          : "bg-red-500"
                   }`}
                 />
 
@@ -207,11 +213,11 @@ export default function ComparisonView({ differences }: Props) {
           </p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {visible.map((item, index) => (
             <div
               key={item.id}
-              className="animate-fade-up"
+              className="animate-fade-up h-full"
               style={{
                 animationDelay: `${Math.min(index * 45, 400)}ms`,
               }}

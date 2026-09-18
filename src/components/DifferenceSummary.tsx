@@ -94,24 +94,6 @@ function RemovedIcon() {
   );
 }
 
-function UnchangedIcon() {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      className="h-4 w-4"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="m5.5 10 3 3 6-6"
-      />
-    </svg>
-  );
-}
-
 export default function DifferenceSummary({
   summary,
   onReset,
@@ -231,7 +213,7 @@ export default function DifferenceSummary({
       </div>
 
       {/* Statistics */}
-      <div className="grid grid-cols-2 gap-3 p-5 sm:grid-cols-4 sm:p-6">
+      <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-3 sm:p-6">
         <StatBadge
           count={summary.changed}
           label="Changed"
@@ -251,13 +233,6 @@ export default function DifferenceSummary({
           label="Removed"
           colorClass="border-red-100 bg-red-50/70 text-red-700"
           icon={<RemovedIcon />}
-        />
-
-        <StatBadge
-          count={summary.unchanged}
-          label="Unchanged"
-          colorClass="border-slate-200 bg-slate-50 text-slate-500"
-          icon={<UnchangedIcon />}
         />
       </div>
     </div>

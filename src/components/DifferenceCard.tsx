@@ -41,6 +41,69 @@ const HINT_LABELS: Record<PresentationHint, string> = {
 };
 
 // ---------------------------------------------------------------------------
+// Compact heading
+// ---------------------------------------------------------------------------
+
+function getCompactHeading(topic: string): string {
+  const cleaned = topic.trim().replace(/\s+/g, " ");
+
+  if (!cleaned) {
+    return "Difference";
+  }
+
+  const words = cleaned.split(" ");
+
+  return words.slice(0, 2).join(" ");
+}
+
+// ---------------------------------------------------------------------------
+// Compact description
+// ---------------------------------------------------------------------------
+
+function cleanValue(value?: string): string {
+  return value?.trim().replace(/\s+/g, " ") || "";
+}
+
+function getCollapsedDescription(item: DifferenceItem): string {
+  const previousValue = cleanValue(item.previous?.value);
+  const currentValue = cleanValue(item.current?.value);
+
+  if (item.type === "changed") {
+    if (previousValue && currentValue) {
+      return `Changed from ${previousValue} to ${currentValue}`;
+    }
+
+    if (currentValue) {
+      return `Changed to ${currentValue}`;
+    }
+
+    if (previousValue) {
+      return `Changed from ${previousValue}`;
+    }
+
+    return "Information has changed";
+  }
+
+  if (item.type === "new") {
+    if (currentValue) {
+      return `${currentValue} was added`;
+    }
+
+    return "New information was added";
+  }
+
+  if (item.type === "removed") {
+    if (previousValue) {
+      return `${previousValue} was removed`;
+    }
+
+    return "Information was removed";
+  }
+
+  return "Meaningful difference detected";
+}
+
+// ---------------------------------------------------------------------------
 // Icons
 // ---------------------------------------------------------------------------
 
@@ -166,7 +229,6 @@ function SourceBlock({
           : "border-emerald-100 bg-emerald-50/50"
       }`}
     >
-      {/* Side accent */}
       <div
         className={`absolute left-0 top-0 h-full w-1 ${
           isPrevious ? "bg-red-400" : "bg-emerald-500"
@@ -226,11 +288,13 @@ interface Props {
 }
 
 export default function DifferenceCard({ item }: Props) {
-  const [expanded, setExpanded] = useState(true);
+  // Cards start collapsed.
+  const [expanded, setExpanded] = useState(false);
 
   const config = TYPE_CONFIG[item.type];
   const hintLabel = HINT_LABELS[item.presentationHint];
-  const confidence = Math.round(item.confidence * 100);
+  const compactHeading = getCompactHeading(item.topic);
+  const collapsedDescription = getCollapsedDescription(item);
 
   return (
     <article className="group relative overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition-all duration-300 hover:shadow-lg hover:shadow-slate-900/[0.04]">
@@ -254,7 +318,8 @@ export default function DifferenceCard({ item }: Props) {
             <ChangeIcon type={item.type} />
           </div>
 
-          <div className="min-w-0 pt-0.5">
+          <div className="min-w-0 flex-1 pt-0.5">
+            {/* Type */}
             <div className="flex flex-wrap items-center gap-2">
               <span
                 className={`rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${config.badgeClass}`}
@@ -267,37 +332,27 @@ export default function DifferenceCard({ item }: Props) {
               </span>
             </div>
 
-            <h3 className="mt-2.5 truncate text-sm font-semibold text-slate-900 sm:text-base">
-              {item.topic}
+            {/* Short heading */}
+            <h3 className="mt-2.5 text-sm font-semibold leading-5 text-slate-900 sm:text-base">
+              {compactHeading}
             </h3>
+
+            {/* Actual change description */}
+            {!expanded && (
+              <p className="mt-1.5 whitespace-normal break-words text-xs font-medium leading-5 text-slate-500">
+                {collapsedDescription}
+              </p>
+            )}
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-3 pt-1">
-          {/* Confidence */}
-          <div className="hidden text-right sm:block">
-            <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-400">
-              Confidence
-            </p>
-            <p className="mt-0.5 text-xs font-semibold text-slate-600">
-              {confidence}%
-            </p>
-          </div>
-
-          {/* Method */}
-          {item.comparisonMethod === "ai-assisted" && (
-            <span className="hidden rounded-full border border-indigo-100 bg-indigo-50 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-indigo-500 md:inline-flex">
-              AI assisted
-            </span>
-          )}
-
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-50 text-slate-400 transition-colors group-hover:bg-slate-100">
-            <ChevronIcon expanded={expanded} />
-          </span>
-        </div>
+        {/* Expand / collapse */}
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-50 text-slate-400 transition-colors group-hover:bg-slate-100">
+          <ChevronIcon expanded={expanded} />
+        </span>
       </button>
 
-      {/* Body */}
+      {/* Expanded body */}
       {expanded && (
         <div className="border-t border-slate-100 px-5 pb-6 pt-5 sm:px-6">
           {/* Explanation */}
@@ -357,10 +412,6 @@ export default function DifferenceCard({ item }: Props) {
               {item.comparisonMethod === "ai-assisted"
                 ? "Semantic + AI comparison"
                 : "Deterministic comparison"}
-            </span>
-
-            <span className="ml-auto text-[10px] font-medium text-slate-400">
-              {confidence}% confidence
             </span>
           </div>
         </div>

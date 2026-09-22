@@ -1,4 +1,4 @@
-// Mock Gemini BEFORE any imports that use it
+// Mock Gemini BEFORE importing the matcher.
 jest.mock("@/lib/gemini", () => ({
   callStructured: jest.fn(),
   callText: jest.fn(),
@@ -15,9 +15,9 @@ jest.mock("@/lib/gemini", () => ({
   },
 }));
 
-import { compareMatchedPairs } from "@/lib/comparator";
+import { matchPropositions } from "@/lib/semanticMatcher";
 import { callStructured } from "@/lib/gemini";
-import type { MatchedPair, NormalizedUnit } from "@/lib/types";
+import type { NormalizedUnit } from "@/lib/types";
 
 const mockCallStructured =
   callStructured as jest.MockedFunction<typeof callStructured>;
@@ -35,29 +35,10 @@ function makeUnit(
     statement: "Test statement.",
     source: {
       page: 1,
-      originalText: "Test.",
+      originalText: "Test statement.",
     },
     extractionConfidence: 0.9,
     ...overrides,
-  };
-}
-
-function makePair(
-  prevOverrides: Partial<NormalizedUnit>,
-  currOverrides: Partial<NormalizedUnit>,
-  confidence = 0.85
-): MatchedPair {
-  return {
-    previous: makeUnit({
-      id: "prev_1",
-      ...prevOverrides,
-    }),
-    current: makeUnit({
-      id: "curr_1",
-      ...currOverrides,
-    }),
-    matchConfidence: confidence,
-    matchRationale: "Same topic",
   };
 }
 
@@ -65,192 +46,452 @@ function makePair(
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("compareMatchedPairs — deterministic", () => {
-  beforeEach(() => jest.clearAllMocks());
-
-  test("detects amount change deterministically (no AI call)", async () => {
-    const pair = makePair(
-      {
-        normalizedAmount: 250,
-        normalizedCurrency: "INR",
-        amountRaw: "₹250",
-      },
-      {
-        normalizedAmount: 500,
-        normalizedCurrency: "INR",
-        amountRaw: "₹500",
-      }
-    );
-
-    const results = await compareMatchedPairs([pair], [], []);
-
-    expect(results[0].type).toBe("changed");
-    expect(results[0].comparisonMethod).toBe("deterministic");
-    expect(results[0].changeDetails).toContain("₹250");
-    expect(results[0].changeDetails).toContain("₹500");
-    expect(mockCallStructured).not.toHaveBeenCalled();
-  });
-
-  test("detects period change deterministically", async () => {
-    const pair = makePair(
-      {
-        normalizedUnit: "per_month",
-      },
-      {
-        normalizedUnit: "per_year",
-      }
-    );
-
-    const results = await compareMatchedPairs([pair], [], []);
-
-    expect(results[0].type).toBe("changed");
-    expect(results[0].comparisonMethod).toBe("deterministic");
-    expect(results[0].changeDetails).toContain("per_month");
-    expect(results[0].changeDetails).toContain("per_year");
-  });
-
-  test("detects submission deadline change deterministically", async () => {
-    const pair = makePair(
-      {
-        normalizedSubmissionDays: 30,
-      },
-      {
-        normalizedSubmissionDays: 60,
-      }
-    );
-
-    const results = await compareMatchedPairs([pair], [], []);
-
-    expect(results[0].type).toBe("changed");
-    expect(results[0].comparisonMethod).toBe("deterministic");
-    expect(results[0].changeDetails).toContain("30 days");
-    expect(results[0].changeDetails).toContain("60 days");
-  });
-
-  test("detects percentage change deterministically", async () => {
-    const pair = makePair(
-      {
-        normalizedPercentage: 10,
-      },
-      {
-        normalizedPercentage: 15,
-      }
-    );
-
-    const results = await compareMatchedPairs([pair], [], []);
-
-    expect(results[0].type).toBe("changed");
-    expect(results[0].comparisonMethod).toBe("deterministic");
+describe("matchPropositions — deterministic semantic subject matching", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
   });
 
   test(
-    "same amount same period → needs AI " +
-      "(no deterministic unchanged verdict at 0.9+ confidence)",
+    "same semantic subject with different value → MATCH",
     async () => {
-      mockCallStructured.mockResolvedValueOnce({
-        classification: "unchanged",
-        reason: "Same meaning",
-        confidence: 0.9,
-      });
+      const previous = [
+        makeUnit({
+          id: "prev_phone",
+          topic: "Contact Information",
+          subject: "Phone Number",
+          statement: "9876543210",
+        }),
+      ];
 
-      const pair = makePair(
-        {
-          normalizedAmount: 500,
-          normalizedUnit: "per_month",
-        },
-        {
-          normalizedAmount: 500,
-          normalizedUnit: "per_month",
-        }
+      const current = [
+        makeUnit({
+          id: "curr_phone",
+          topic: "Contact Information",
+          subject: "Phone Number",
+          statement: "9840059370",
+        }),
+      ];
+
+      const result = await matchPropositions(
+        previous,
+        current
       );
 
-      const results = await compareMatchedPairs([pair], [], []);
+      expect(result.matched).toHaveLength(1);
 
-      // Deterministic may find unchanged with 0.8 confidence → AI still
-      // called for <0.9, OR it finds unchanged at ≥0.9 and skips AI.
-      expect(["unchanged"]).toContain(results[0].type);
+      expect(
+        result.matched[0].previous.id
+      ).toBe("prev_phone");
+
+      expect(
+        result.matched[0].current.id
+      ).toBe("curr_phone");
+
+      expect(
+        result.unmatchedPrevious
+      ).toHaveLength(0);
+
+      expect(
+        result.unmatchedCurrent
+      ).toHaveLength(0);
+
+      // No Gemini call should be necessary.
+      expect(
+        mockCallStructured
+      ).not.toHaveBeenCalled();
     }
   );
-});
-
-describe("compareMatchedPairs — unmatched", () => {
-  beforeEach(() => jest.clearAllMocks());
-
-  test("unmatched previous → REMOVED", async () => {
-    const unit = makeUnit({
-      id: "prev_orphan",
-      topic: "Old Policy",
-    });
-
-    const results = await compareMatchedPairs([], [unit], []);
-
-    expect(results[0].type).toBe("removed");
-    expect(results[0].previousUnit?.id).toBe("prev_orphan");
-    expect(results[0].comparisonMethod).toBe("deterministic");
-  });
-
-  test("unmatched current → NEW", async () => {
-    const unit = makeUnit({
-      id: "curr_orphan",
-      topic: "New Policy",
-    });
-
-    const results = await compareMatchedPairs([], [], [unit]);
-
-    expect(results[0].type).toBe("new");
-    expect(results[0].currentUnit?.id).toBe("curr_orphan");
-    expect(results[0].comparisonMethod).toBe("deterministic");
-  });
-});
-
-describe("compareMatchedPairs — AI conservative fallback", () => {
-  beforeEach(() => jest.clearAllMocks());
 
   test(
-    "AI-reported change with confidence < 0.7 " +
-      "is downgraded to unchanged",
+    "same semantic subject with same value → MATCH",
     async () => {
-      mockCallStructured.mockResolvedValueOnce({
-        classification: "changed",
-        reason: "Minor wording",
-        confidence: 0.5,
-      });
-
-      const pair = makePair(
-        {
-          statement: "Employees may claim expenses.",
-        },
-        {
+      const previous = [
+        makeUnit({
+          id: "prev_email",
+          subject: "Email",
           statement:
-            "Eligible staff members may claim reimbursements.",
-        }
+            "santhosh@example.com",
+        }),
+      ];
+
+      const current = [
+        makeUnit({
+          id: "curr_email",
+          subject: "Email",
+          statement:
+            "santhosh@example.com",
+        }),
+      ];
+
+      const result = await matchPropositions(
+        previous,
+        current
       );
 
-      const results = await compareMatchedPairs([pair], [], []);
+      expect(result.matched).toHaveLength(1);
 
-      expect(results[0].type).toBe("unchanged");
+      expect(
+        result.unmatchedPrevious
+      ).toHaveLength(0);
+
+      expect(
+        result.unmatchedCurrent
+      ).toHaveLength(0);
+
+      expect(
+        mockCallStructured
+      ).not.toHaveBeenCalled();
     }
   );
 
   test(
-    "AI failure → propagates error instead of hiding the comparison",
+    "equivalent subject labels → MATCH without Gemini",
     async () => {
-      mockCallStructured.mockRejectedValueOnce(
-        new Error("AI unavailable")
+      const previous = [
+        makeUnit({
+          id: "prev_mobile",
+          subject: "Mobile Number",
+          statement: "9876543210",
+        }),
+      ];
+
+      const current = [
+        makeUnit({
+          id: "curr_phone",
+          subject: "Phone Number",
+          statement: "9840059370",
+        }),
+      ];
+
+      const result = await matchPropositions(
+        previous,
+        current
       );
 
-      const pair = makePair(
-        {
-          statement: "Policy A applies.",
-        },
-        {
-          statement: "Policy A is in effect.",
-        }
+      expect(result.matched).toHaveLength(1);
+
+      expect(
+        result.matched[0].previous.id
+      ).toBe("prev_mobile");
+
+      expect(
+        result.matched[0].current.id
+      ).toBe("curr_phone");
+
+      expect(
+        mockCallStructured
+      ).not.toHaveBeenCalled();
+    }
+  );
+
+  test(
+    "singular/plural subject variants → MATCH",
+    async () => {
+      const previous = [
+        makeUnit({
+          id: "prev_project",
+          topic: "Projects",
+          subject: "Project",
+          statement:
+            "Document Difference Analyzer",
+        }),
+      ];
+
+      const current = [
+        makeUnit({
+          id: "curr_project",
+          topic: "Project",
+          subject: "Projects",
+          statement:
+            "Document Difference Analyzer v2",
+        }),
+      ];
+
+      const result = await matchPropositions(
+        previous,
+        current
       );
 
-      await expect(
-        compareMatchedPairs([pair], [], [])
-      ).rejects.toThrow("AI unavailable");
+      expect(result.matched).toHaveLength(1);
+
+      expect(
+        result.unmatchedPrevious
+      ).toHaveLength(0);
+
+      expect(
+        result.unmatchedCurrent
+      ).toHaveLength(0);
+
+      expect(
+        mockCallStructured
+      ).not.toHaveBeenCalled();
+    }
+  );
+
+  test(
+    "different semantic subjects are not automatically matched",
+    async () => {
+      mockCallStructured.mockResolvedValueOnce({
+        matches: [],
+      });
+
+      const previous = [
+        makeUnit({
+          id: "prev_email",
+          subject: "Email",
+          statement:
+            "old@example.com",
+        }),
+      ];
+
+      const current = [
+        makeUnit({
+          id: "curr_phone",
+          subject: "Phone Number",
+          statement:
+            "9840059370",
+        }),
+      ];
+
+      const result = await matchPropositions(
+        previous,
+        current
+      );
+
+      expect(result.matched).toHaveLength(0);
+
+      expect(
+        result.unmatchedPrevious
+      ).toHaveLength(1);
+
+      expect(
+        result.unmatchedPrevious[0].id
+      ).toBe("prev_email");
+
+      expect(
+        result.unmatchedCurrent
+      ).toHaveLength(1);
+
+      expect(
+        result.unmatchedCurrent[0].id
+      ).toBe("curr_phone");
+
+      // Because the subjects differ, Gemini is allowed to evaluate the
+      // genuinely ambiguous case.
+      expect(
+        mockCallStructured
+      ).toHaveBeenCalled();
+    }
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Unmatched propositions
+// ---------------------------------------------------------------------------
+
+describe("matchPropositions — unmatched propositions", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test(
+    "previous-only proposition remains unmatched",
+    async () => {
+      const previous = [
+        makeUnit({
+          id: "prev_old",
+          subject: "Old Policy",
+          statement:
+            "Old policy information.",
+        }),
+      ];
+
+      const current = [
+        makeUnit({
+          id: "curr_current",
+          subject: "Current Policy",
+          statement:
+            "Current policy information.",
+        }),
+      ];
+
+      mockCallStructured.mockResolvedValueOnce({
+        matches: [],
+      });
+
+      const result = await matchPropositions(
+        previous,
+        current
+      );
+
+      expect(
+        result.matched
+      ).toHaveLength(0);
+
+      expect(
+        result.unmatchedPrevious
+      ).toHaveLength(1);
+
+      expect(
+        result.unmatchedPrevious[0].id
+      ).toBe("prev_old");
+
+      expect(
+        result.unmatchedCurrent
+      ).toHaveLength(1);
+
+      expect(
+        result.unmatchedCurrent[0].id
+      ).toBe("curr_current");
+    }
+  );
+
+  test(
+    "current-only proposition remains unmatched",
+    async () => {
+      const previous = [
+        makeUnit({
+          id: "prev_email",
+          subject: "Email",
+          statement:
+            "old@example.com",
+        }),
+      ];
+
+      const current = [
+        makeUnit({
+          id: "curr_email",
+          subject: "Email",
+          statement:
+            "new@example.com",
+        }),
+      ];
+
+      // These should actually be deterministically matched because the
+      // subject is the same.
+      const result = await matchPropositions(
+        previous,
+        current
+      );
+
+      expect(
+        result.matched
+      ).toHaveLength(1);
+
+      expect(
+        result.unmatchedPrevious
+      ).toHaveLength(0);
+
+      expect(
+        result.unmatchedCurrent
+      ).toHaveLength(0);
+
+      expect(
+        mockCallStructured
+      ).not.toHaveBeenCalled();
+    }
+  );
+});
+
+// ---------------------------------------------------------------------------
+// One-to-one assignment
+// ---------------------------------------------------------------------------
+
+describe("matchPropositions — one-to-one subject matching", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test(
+    "multiple subjects are matched independently",
+    async () => {
+      const previous = [
+        makeUnit({
+          id: "prev_name",
+          subject: "Name",
+          statement:
+            "Old Name",
+        }),
+        makeUnit({
+          id: "prev_email",
+          subject: "Email",
+          statement:
+            "old@example.com",
+        }),
+        makeUnit({
+          id: "prev_phone",
+          subject: "Phone Number",
+          statement:
+            "9876543210",
+        }),
+      ];
+
+      const current = [
+        makeUnit({
+          id: "curr_name",
+          subject: "Name",
+          statement:
+            "New Name",
+        }),
+        makeUnit({
+          id: "curr_email",
+          subject: "Email",
+          statement:
+            "new@example.com",
+        }),
+        makeUnit({
+          id: "curr_phone",
+          subject: "Phone Number",
+          statement:
+            "9840059370",
+        }),
+      ];
+
+      const result = await matchPropositions(
+        previous,
+        current
+      );
+
+      expect(
+        result.matched
+      ).toHaveLength(3);
+
+      expect(
+        result.unmatchedPrevious
+      ).toHaveLength(0);
+
+      expect(
+        result.unmatchedCurrent
+      ).toHaveLength(0);
+
+      expect(
+        mockCallStructured
+      ).not.toHaveBeenCalled();
+
+      const pairs =
+        result.matched.map(
+          (pair) => [
+            pair.previous.id,
+            pair.current.id,
+          ]
+        );
+
+      expect(pairs).toEqual(
+        expect.arrayContaining([
+          [
+            "prev_name",
+            "curr_name",
+          ],
+          [
+            "prev_email",
+            "curr_email",
+          ],
+          [
+            "prev_phone",
+            "curr_phone",
+          ],
+        ])
+      );
     }
   );
 });

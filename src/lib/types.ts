@@ -29,7 +29,7 @@ export interface PropositionUnit {
   /** Unique identifier within the document (e.g. "prev_1", "curr_3") */
   id: string;
 
-  /** Short label identifying the subject of this proposition.
+  /** Short label identifying the subject/category of this proposition.
    *  e.g. "Medical Reimbursement Limit", "Application Deadline" */
   topic: string;
 
@@ -39,10 +39,11 @@ export interface PropositionUnit {
 
   // Structured fields — all optional, populated only when applicable
 
-  /** Who this proposition applies to */
+  /** Stable semantic identity of the specific information being described.
+   *  e.g. "phone number", "email", "project name", "duration" */
   subject?: string;
 
-  /** Eligibility condition(s) that must be met */
+  /** Who this proposition applies to */
   eligibilityCondition?: string;
 
   /** What is granted or provided */
@@ -187,8 +188,16 @@ export interface DifferenceItemSource {
 
 export interface DifferenceItem {
   id: string;
+
   type: Exclude<ChangeType, "unchanged">;
+
+  /** Broad semantic category used for grouping related differences.
+   *  e.g. "Contact Information", "Internship", "Projects" */
   topic: string;
+
+  /** Stable semantic identity of the specific information being compared.
+   *  e.g. "Phone Number", "Email", "Duration", "Project Name" */
+  subject?: string;
 
   /** Details from the previous document (undefined for "new" items) */
   previous?: DifferenceItemSource;

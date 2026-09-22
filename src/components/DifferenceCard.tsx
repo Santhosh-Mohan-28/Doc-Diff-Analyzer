@@ -41,32 +41,72 @@ const HINT_LABELS: Record<PresentationHint, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Compact heading
+// Subject heading
 // ---------------------------------------------------------------------------
 
-function getCompactHeading(topic: string): string {
-  const cleaned = topic.trim().replace(/\s+/g, " ");
+function getSubjectHeading(item: DifferenceItem): string {
+  const subject =
+    item.subject?.trim() ||
+    item.current?.content?.trim() ||
+    item.previous?.content?.trim() ||
+    item.topic?.trim();
 
-  if (!cleaned) {
+  if (!subject) {
     return "Difference";
   }
 
-  const words = cleaned.split(" ");
+  return subject.replace(/\s+/g, " ");
+}
 
-  return words.slice(0, 2).join(" ");
+// ---------------------------------------------------------------------------
+// Compact text helpers
+// ---------------------------------------------------------------------------
+
+function cleanText(value?: string): string {
+  return value?.trim().replace(/\s+/g, " ") || "";
+}
+
+function shortenText(value: string, maxLength = 90): string {
+  const cleaned = cleanText(value);
+
+  if (!cleaned) {
+    return "";
+  }
+
+  if (cleaned.length <= maxLength) {
+    return cleaned;
+  }
+
+  return `${cleaned.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function getDisplayValue(
+  value?: string,
+  content?: string
+): string {
+  const cleanedValue = cleanText(value);
+
+  if (cleanedValue) {
+    return shortenText(cleanedValue);
+  }
+
+  return shortenText(content || "");
 }
 
 // ---------------------------------------------------------------------------
 // Compact description
 // ---------------------------------------------------------------------------
 
-function cleanValue(value?: string): string {
-  return value?.trim().replace(/\s+/g, " ") || "";
-}
-
 function getCollapsedDescription(item: DifferenceItem): string {
-  const previousValue = cleanValue(item.previous?.value);
-  const currentValue = cleanValue(item.current?.value);
+  const previousValue = getDisplayValue(
+    item.previous?.value,
+    item.previous?.content
+  );
+
+  const currentValue = getDisplayValue(
+    item.current?.value,
+    item.current?.content
+  );
 
   if (item.type === "changed") {
     if (previousValue && currentValue) {
@@ -288,12 +328,11 @@ interface Props {
 }
 
 export default function DifferenceCard({ item }: Props) {
-  // Cards start collapsed.
   const [expanded, setExpanded] = useState(false);
 
   const config = TYPE_CONFIG[item.type];
   const hintLabel = HINT_LABELS[item.presentationHint];
-  const compactHeading = getCompactHeading(item.topic);
+  const subjectHeading = getSubjectHeading(item);
   const collapsedDescription = getCollapsedDescription(item);
 
   return (
@@ -332,9 +371,9 @@ export default function DifferenceCard({ item }: Props) {
               </span>
             </div>
 
-            {/* Short heading */}
-            <h3 className="mt-2.5 text-sm font-semibold leading-5 text-slate-900 sm:text-base">
-              {compactHeading}
+            {/* Semantic subject */}
+            <h3 className="mt-2.5 break-words text-sm font-semibold leading-5 text-slate-900 sm:text-base">
+              {subjectHeading}
             </h3>
 
             {/* Actual change description */}

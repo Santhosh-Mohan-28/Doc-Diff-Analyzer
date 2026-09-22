@@ -109,23 +109,22 @@ function jaccard(
 
 // ---------------------------------------------------------------------------
 // Semantic subject normalization
-//
-// The extractor provides a stable semantic subject for each proposition.
-// We normalize equivalent labels so that small wording differences do not
-// prevent candidate generation.
-//
-// Examples:
-//
-// "Name"              -> "name"
-// "Full Name"         -> "name"
-// "Company"           -> "employer"
-// "Employer"          -> "employer"
-// "University"        -> "school"
-// "College"           -> "school"
-// "Phone Number"      -> "phone"
-// "Mobile Number"     -> "phone"
-// "Job Position"      -> "job title"
 // ---------------------------------------------------------------------------
+
+/*
+ * The subject is the stable semantic identity of a proposition.
+ *
+ * This normalization is intentionally conservative.
+ *
+ * It handles:
+ * - capitalization
+ * - punctuation
+ * - whitespace
+ * - common equivalent labels
+ * - simple singular/plural differences
+ *
+ * It does NOT merge arbitrary subjects merely because they share words.
+ */
 
 function normalizeSubject(
   subject: string
@@ -136,10 +135,7 @@ function normalizeSubject(
     .replace(/\s+/g, " ")
     .trim();
 
-  const aliases: Record<
-    string,
-    string
-  > = {
+  const aliases: Record<string, string> = {
     "full name": "name",
     "candidate name": "name",
 
@@ -186,7 +182,83 @@ function normalizeSubject(
     "maximum coverage": "coverage limit",
   };
 
-  return aliases[value] ?? value;
+  const aliased = aliases[value] ?? value;
+
+  return singularizeSubject(aliased);
+}
+
+// ---------------------------------------------------------------------------
+// Conservative singularization
+// ---------------------------------------------------------------------------
+
+function singularizeSubject(
+  subject: string
+): string {
+  const words = subject.split(" ");
+
+  const singularized = words.map((word) => {
+    if (word.length <= 3) {
+      return word;
+    }
+
+    if (word.endsWith("ies")) {
+      return `${word.slice(0, -3)}y`;
+    }
+
+    if (
+      word.endsWith("ses") &&
+      word.length > 4
+    ) {
+      return word.slice(0, -2);
+    }
+
+    if (
+      word.endsWith("s") &&
+      !word.endsWith("ss") &&
+      !word.endsWith("us")
+    ) {
+      return word.slice(0, -1);
+    }
+
+    return word;
+  });
+
+  return singularized.join(" ");
+}
+
+// ---------------------------------------------------------------------------
+// Deterministic subject identity
+// ---------------------------------------------------------------------------
+
+function getSubjectKey(
+  unit: NormalizedUnit
+): string {
+  const subject =
+    unit.subject?.trim() ||
+    unit.topic?.trim() ||
+    "";
+
+  return normalizeSubject(subject);
+}
+
+function hasSameSemanticSubject(
+  previous: NormalizedUnit,
+  current: NormalizedUnit
+): boolean {
+  const previousSubject =
+    getSubjectKey(previous);
+
+  const currentSubject =
+    getSubjectKey(current);
+
+  if (
+    !previousSubject ||
+    !currentSubject
+  ) {
+    return false;
+  }
+
+  return previousSubject === currentSubject;
 }
 
 function subjectSimilarity(
@@ -194,16 +266,10 @@ function subjectSimilarity(
   current: NormalizedUnit
 ): number {
   const previousSubject =
-    normalizeSubject(
-      previous.subject ??
-        previous.topic
-    );
+    getSubjectKey(previous);
 
   const currentSubject =
-    normalizeSubject(
-      current.subject ??
-        current.topic
-    );
+    getSubjectKey(current);
 
   if (
     !previousSubject ||
@@ -213,8 +279,7 @@ function subjectSimilarity(
   }
 
   if (
-    previousSubject ===
-    currentSubject
+    previousSubject === currentSubject
   ) {
     return 1;
   }
@@ -227,16 +292,6 @@ function subjectSimilarity(
 
 // ---------------------------------------------------------------------------
 // Label signal extraction
-//
-// This is generic and is not intended to be resume-specific.
-// It helps recognize explicit field labels such as:
-//
-// "Name: Rahul"
-// "School: ABC College"
-// "Company: Google"
-// "Interest Rate: 8.5%"
-//
-// Final semantic matching is still performed by Gemini.
 // ---------------------------------------------------------------------------
 
 function extractLabelSignals(
@@ -297,9 +352,7 @@ function extractLabelSignals(
       normalized.match(pattern);
 
     if (match?.[1]) {
-      for (const word of match[1].split(
-        /\s+/
-      )) {
+      for (const word of match[1].split(/\s+/)) {
         if (
           word.length > 2 &&
           !STOP_WORDS.has(word)
@@ -315,15 +368,6 @@ function extractLabelSignals(
 
 // ---------------------------------------------------------------------------
 // Affinity score
-//
-// Subject is the strongest signal.
-//
-// IMPORTANT:
-// A completely different value can still have very high semantic
-// correspondence when both propositions occupy the same conceptual slot.
-//
-// Affinity only prioritizes candidates. Gemini makes the actual semantic
-// correspondence decision.
 // ---------------------------------------------------------------------------
 
 function computeAffinity(
@@ -372,13 +416,16 @@ function computeAffinity(
     0.55;
 
   score +=
-    topicSimilarity * 0.20;
+    topicSimilarity *
+    0.20;
 
   score +=
-    statementSimilarity * 0.15;
+    statementSimilarity *
+    0.15;
 
   score +=
-    labelSimilarity * 0.10;
+    labelSimilarity *
+    0.10;
 
   if (
     prev.normalizedAmount !==
@@ -406,16 +453,148 @@ function computeAffinity(
 }
 
 // ---------------------------------------------------------------------------
-// Candidate generation
+// Deterministic exact-subject matching
 //
-// ARCHITECTURAL RULE:
+// This is deliberately performed BEFORE Gemini.
+//
+// If both documents contain the same semantic subject, that is enough to
+// establish correspondence. The comparator will later decide whether the
+// values/content are unchanged or changed.
+//
+// This prevents:
+//
+//   Previous: Phone = 1234567890
+//   Current:  Phone = 9876543210
+//
+// from becoming:
+//
+//   REMOVED Phone
+//   NEW Phone
+//
+// It becomes one matched pair:
+//
+//   CHANGED Phone: old -> new
+// ---------------------------------------------------------------------------
+
+function matchExactSubjects(
+  previous: NormalizedUnit[],
+  current: NormalizedUnit[],
+  alreadyMatchedPrevious: Set<string>,
+  alreadyMatchedCurrent: Set<string>
+): MatchedPair[] {
+  const matches: MatchedPair[] = [];
+
+  const currentBySubject =
+    new Map<string, NormalizedUnit[]>();
+
+  for (const curr of current) {
+    if (
+      alreadyMatchedCurrent.has(curr.id)
+    ) {
+      continue;
+    }
+
+    const key = getSubjectKey(curr);
+
+    if (!key) {
+      continue;
+    }
+
+    const list =
+      currentBySubject.get(key) ?? [];
+
+    list.push(curr);
+    currentBySubject.set(key, list);
+  }
+
+  for (const prev of previous) {
+    if (
+      alreadyMatchedPrevious.has(prev.id)
+    ) {
+      continue;
+    }
+
+    const key = getSubjectKey(prev);
+
+    if (!key) {
+      continue;
+    }
+
+    const candidates =
+      currentBySubject.get(key);
+
+    if (!candidates?.length) {
+      continue;
+    }
+
+    /*
+     * If several propositions share the same subject, choose the candidate
+     * with the strongest contextual affinity rather than blindly taking the
+     * first one.
+     */
+    let bestIndex = 0;
+    let bestScore = -1;
+
+    for (
+      let i = 0;
+      i < candidates.length;
+      i++
+    ) {
+      const candidate =
+        candidates[i];
+
+      const score =
+        computeAffinity(
+          prev,
+          candidate
+        );
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    }
+
+    const curr =
+      candidates[bestIndex];
+
+    if (!curr) {
+      continue;
+    }
+
+    matches.push({
+      previous: prev,
+      current: curr,
+      matchConfidence: 1,
+      matchRationale:
+        "Deterministic semantic subject match.",
+    });
+
+    alreadyMatchedPrevious.add(
+      prev.id
+    );
+
+    alreadyMatchedCurrent.add(
+      curr.id
+    );
+
+    candidates.splice(
+      bestIndex,
+      1
+    );
+  }
+
+  return matches;
+}
+
+// ---------------------------------------------------------------------------
+// Candidate generation for genuinely unresolved propositions
 //
 // Candidate generation is recall-focused.
-//
 // Different wording or different values must NOT prevent a possible match.
 //
-// Every previous unit and every current unit is guaranteed to appear in
-// at least one candidate pair.
+// Every unresolved previous unit and every unresolved current unit is
+// guaranteed to appear in at least one candidate pair.
 // ---------------------------------------------------------------------------
 
 interface CandidatePair {
@@ -477,8 +656,6 @@ function generateCandidates(
         pair.curr.id
       );
 
-    // Include reasonably strong candidates plus anything needed to
-    // guarantee that every proposition is represented.
     const highAffinity =
       pair.affinity >= 0.15;
 
@@ -667,11 +844,9 @@ DO NOT classify the same field with a changed value as both REMOVED and NEW.
 
 The comparison stage will determine whether a matched pair is actually CHANGED or UNCHANGED.
 
-Use the explicit Subject field as a strong semantic signal, but also consider Topic and Statement for context.
+Use the explicit Subject field as the strongest semantic signal, but also consider Topic and Statement for context.
 
 Section placement does not matter.
-
-A proposition may have moved to another section and still correspond to the previous proposition.
 
 Formatting does not matter.
 
@@ -684,7 +859,9 @@ However, fundamentally different concepts must NOT be matched merely because the
 For example:
 
 Subject: interest rate
+
 and
+
 Subject: application deadline
 
 are different semantic subjects.
@@ -742,39 +919,84 @@ export async function matchPropositions(
   }
 
   // -------------------------------------------------------------------------
-  // Step 1: Generate recall-focused candidates
+  // Step 1: Deterministically match identical semantic subjects.
+  //
+  // This is the most important reconciliation step.
+  // -------------------------------------------------------------------------
+
+  const matchedPrev =
+    new Set<string>();
+
+  const matchedCurr =
+    new Set<string>();
+
+  const confirmed: MatchedPair[] =
+    matchExactSubjects(
+      previous,
+      current,
+      matchedPrev,
+      matchedCurr
+    );
+
+  // -------------------------------------------------------------------------
+  // Step 2: Only unresolved propositions go through Gemini.
+  //
+  // This reduces Gemini usage and reserves AI matching for cases where
+  // deterministic subject identity is insufficient.
+  // -------------------------------------------------------------------------
+
+  const unresolvedPrevious =
+    previous.filter(
+      (unit) =>
+        !matchedPrev.has(unit.id)
+    );
+
+  const unresolvedCurrent =
+    current.filter(
+      (unit) =>
+        !matchedCurr.has(unit.id)
+    );
+
+  if (
+    !unresolvedPrevious.length ||
+    !unresolvedCurrent.length
+  ) {
+    return {
+      matched: confirmed,
+      unmatchedPrevious:
+        unresolvedPrevious,
+      unmatchedCurrent:
+        unresolvedCurrent,
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 3: Generate recall-focused candidates for unresolved propositions.
   // -------------------------------------------------------------------------
 
   const candidates =
     generateCandidates(
-      previous,
-      current
+      unresolvedPrevious,
+      unresolvedCurrent
     );
 
   // -------------------------------------------------------------------------
-  // Step 2: Ask Gemini to identify semantic correspondences.
-  //
-  // We do NOT immediately lock a match when Gemini returns it.
-  //
-  // We collect all proposed matches first, then perform a global
-  // confidence-based one-to-one assignment.
+  // Step 4: Ask Gemini to identify semantic correspondences.
   // -------------------------------------------------------------------------
 
-  const allProposedMatches: GeminiMatch[] =
-    [];
+  const allProposedMatches:
+    GeminiMatch[] = [];
 
   const prevMap = new Map(
-    previous.map((p) => [
-      p.id,
-      p,
-    ])
+    unresolvedPrevious.map(
+      (p) => [p.id, p]
+    )
   );
 
   const currMap = new Map(
-    current.map((c) => [
-      c.id,
-      c,
-    ])
+    unresolvedCurrent.map(
+      (c) => [c.id, c]
+    )
   );
 
   for (
@@ -851,7 +1073,7 @@ ${pairDescriptions}`,
 
       for (
         const match of
-          result.matches ?? []
+        result.matches ?? []
       ) {
         const prev =
           prevMap.get(
@@ -868,8 +1090,7 @@ ${pairDescriptions}`,
         }
 
         if (
-          match.confidence <
-          0.55
+          match.confidence < 0.55
         ) {
           continue;
         }
@@ -893,10 +1114,9 @@ ${pairDescriptions}`,
   }
 
   // -------------------------------------------------------------------------
-  // Step 3: Global one-to-one assignment
+  // Step 5: Global one-to-one assignment.
   //
-  // Sort all proposed matches by confidence.
-  // Then accept the strongest available correspondence for each proposition.
+  // The strongest semantic correspondence wins.
   // -------------------------------------------------------------------------
 
   allProposedMatches.sort(
@@ -905,18 +1125,9 @@ ${pairDescriptions}`,
       a.confidence
   );
 
-  const matchedPrev =
-    new Set<string>();
-
-  const matchedCurr =
-    new Set<string>();
-
-  const confirmed: MatchedPair[] =
-    [];
-
   for (
     const match of
-      allProposedMatches
+    allProposedMatches
   ) {
     const prev =
       prevMap.get(
@@ -933,12 +1144,8 @@ ${pairDescriptions}`,
     }
 
     if (
-      matchedPrev.has(
-        prev.id
-      ) ||
-      matchedCurr.has(
-        curr.id
-      )
+      matchedPrev.has(prev.id) ||
+      matchedCurr.has(curr.id)
     ) {
       continue;
     }
@@ -962,9 +1169,12 @@ ${pairDescriptions}`,
   }
 
   // -------------------------------------------------------------------------
-  // Step 4: Determine genuinely unmatched propositions.
+  // Step 6: Determine genuinely unmatched propositions.
   //
-  // Anything that was not matched becomes a candidate for NEW or REMOVED.
+  // IMPORTANT:
+  // At this point NEW/REMOVED classification is safe because all deterministic
+  // subject matches and all accepted semantic Gemini matches have already
+  // been reconciled.
   // -------------------------------------------------------------------------
 
   const unmatchedPrevious =

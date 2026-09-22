@@ -10,7 +10,9 @@ import { callStructured } from "./gemini";
 // Determine presentation hint from item characteristics
 // ---------------------------------------------------------------------------
 
-function determinePresentationHint(item: ValidatedDifferenceItem): PresentationHint {
+function determinePresentationHint(
+  item: ValidatedDifferenceItem
+): PresentationHint {
   if (item.type === "new") return "new-item";
   if (item.type === "removed") return "removed-item";
 
@@ -22,34 +24,53 @@ function determinePresentationHint(item: ValidatedDifferenceItem): PresentationH
     prev?.normalizedAmount !== undefined &&
     curr?.normalizedAmount !== undefined &&
     prev.normalizedAmount !== curr.normalizedAmount
-  ) return "value-change";
+  ) {
+    return "value-change";
+  }
 
   if (
     prev?.normalizedPercentage !== undefined &&
     curr?.normalizedPercentage !== undefined &&
     Math.abs(prev.normalizedPercentage - curr.normalizedPercentage) > 0.001
-  ) return "value-change";
+  ) {
+    return "value-change";
+  }
 
   // Deadline changed
   if (
     prev?.normalizedSubmissionDays !== undefined &&
     curr?.normalizedSubmissionDays !== undefined &&
     prev.normalizedSubmissionDays !== curr.normalizedSubmissionDays
-  ) return "condition-change";
+  ) {
+    return "condition-change";
+  }
 
   // Effective date
-  if (prev?.effectiveDate && curr?.effectiveDate && prev.effectiveDate !== curr.effectiveDate)
+  if (
+    prev?.effectiveDate &&
+    curr?.effectiveDate &&
+    prev.effectiveDate !== curr.effectiveDate
+  ) {
     return "date-change";
+  }
 
   // Eligibility condition
-  if (prev?.eligibilityCondition !== curr?.eligibilityCondition && (prev?.eligibilityCondition || curr?.eligibilityCondition))
+  if (
+    prev?.eligibilityCondition !== curr?.eligibilityCondition &&
+    (prev?.eligibilityCondition || curr?.eligibilityCondition)
+  ) {
     return "condition-change";
+  }
 
   // Procedure
-  if (prev?.procedure || curr?.procedure) return "procedure-change";
+  if (prev?.procedure || curr?.procedure) {
+    return "procedure-change";
+  }
 
   // Definition
-  if (prev?.definition || curr?.definition) return "definition-change";
+  if (prev?.definition || curr?.definition) {
+    return "definition-change";
+  }
 
   // Multiple fields changed
   const changedFields = [
@@ -58,7 +79,10 @@ function determinePresentationHint(item: ValidatedDifferenceItem): PresentationH
     prev?.submissionCondition !== curr?.submissionCondition,
     prev?.exception !== curr?.exception,
   ].filter(Boolean).length;
-  if (changedFields >= 2) return "multi-change";
+
+  if (changedFields >= 2) {
+    return "multi-change";
+  }
 
   return "policy-change";
 }
@@ -69,11 +93,46 @@ function determinePresentationHint(item: ValidatedDifferenceItem): PresentationH
 
 function formatContent(unit: NormalizedUnit): string {
   const parts: string[] = [unit.statement];
-  if (unit.eligibilityCondition) parts.push(`Eligibility: ${unit.eligibilityCondition}`);
-  if (unit.submissionCondition) parts.push(`Submission: ${unit.submissionCondition}`);
-  if (unit.exception) parts.push(`Exception: ${unit.exception}`);
-  if (unit.procedure) parts.push(`Procedure: ${unit.procedure}`);
+
+  if (unit.eligibilityCondition) {
+    parts.push(`Eligibility: ${unit.eligibilityCondition}`);
+  }
+
+  if (unit.submissionCondition) {
+    parts.push(`Submission: ${unit.submissionCondition}`);
+  }
+
+  if (unit.exception) {
+    parts.push(`Exception: ${unit.exception}`);
+  }
+
+  if (unit.procedure) {
+    parts.push(`Procedure: ${unit.procedure}`);
+  }
+
   return parts.join(". ");
+}
+
+// ---------------------------------------------------------------------------
+// Get stable semantic subject
+//
+// The subject represents the specific information being compared.
+// Examples:
+//   topic   = "Contact Information"
+//   subject = "Phone Number"
+//
+//   topic   = "Internship"
+//   subject = "Internship Duration"
+// ---------------------------------------------------------------------------
+
+function getSubject(item: ValidatedDifferenceItem): string {
+  return (
+    item.currentUnit?.subject?.trim() ||
+    item.previousUnit?.subject?.trim() ||
+    item.currentUnit?.topic?.trim() ||
+    item.previousUnit?.topic?.trim() ||
+    "Unknown"
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -94,17 +153,22 @@ RULES:
 
 const EXPLANATION_SCHEMA = {
   type: "object",
-  properties: { explanation: { type: "string" } },
+  properties: {
+    explanation: { type: "string" },
+  },
   required: ["explanation"],
 };
 
-async function generateExplanation(item: ValidatedDifferenceItem): Promise<string> {
+async function generateExplanation(
+  item: ValidatedDifferenceItem
+): Promise<string> {
   let prompt: string;
 
   if (item.type === "new") {
     prompt = `New information introduced in the current document:
 
 Topic: ${item.currentUnit?.topic}
+Subject: ${item.currentUnit?.subject ?? "(not specified)"}
 Content: ${item.currentUnit?.statement}
 Original text: "${item.currentUnit?.source.originalText}"
 
@@ -113,6 +177,7 @@ Write a concise explanation of what new information was introduced.`;
     prompt = `Information from the previous document is absent from the current document:
 
 Topic: ${item.previousUnit?.topic}
+Subject: ${item.previousUnit?.subject ?? "(not specified)"}
 Content: ${item.previousUnit?.statement}
 Original text: "${item.previousUnit?.source.originalText}"
 
@@ -121,6 +186,7 @@ Write a concise explanation of what information was removed.`;
     prompt = `A meaningful change was detected in the following information:
 
 Topic: ${item.previousUnit?.topic ?? item.currentUnit?.topic}
+Subject: ${getSubject(item)}
 
 PREVIOUS VERSION:
 ${formatContent(item.previousUnit!)}
@@ -141,17 +207,31 @@ Write a clear explanation of what changed.`;
       prompt,
       EXPLANATION_SCHEMA
     );
+
     return result.explanation?.trim() || generateFallbackExplanation(item);
   } catch {
     return generateFallbackExplanation(item);
   }
 }
 
-function generateFallbackExplanation(item: ValidatedDifferenceItem): string {
-  if (item.type === "new") return `New information introduced: ${item.currentUnit?.topic ?? "unknown topic"}.`;
-  if (item.type === "removed") return `Information removed: ${item.previousUnit?.topic ?? "unknown topic"}.`;
-  if (item.changeDetails) return `Changed in ${item.previousUnit?.topic ?? "unknown topic"}: ${item.changeDetails}.`;
-  return `Meaningful change detected in ${item.previousUnit?.topic ?? "unknown topic"}.`;
+function generateFallbackExplanation(
+  item: ValidatedDifferenceItem
+): string {
+  const subject = getSubject(item);
+
+  if (item.type === "new") {
+    return `New information introduced: ${subject}.`;
+  }
+
+  if (item.type === "removed") {
+    return `Information removed: ${subject}.`;
+  }
+
+  if (item.changeDetails) {
+    return `Changed in ${subject}: ${item.changeDetails}.`;
+  }
+
+  return `Meaningful change detected in ${subject}.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -174,7 +254,16 @@ export async function generateReport(
     const diffItem: DifferenceItem = {
       id: `diff_${idCounter++}`,
       type: item.type,
-      topic: item.previousUnit?.topic ?? item.currentUnit?.topic ?? "Unknown",
+
+      // Broad category used for grouping.
+      topic:
+        item.previousUnit?.topic ??
+        item.currentUnit?.topic ??
+        "Unknown",
+
+      // Specific semantic field used as the card heading.
+      subject: getSubject(item),
+
       explanation,
       confidence: item.confidence,
       presentationHint: hint,
@@ -184,7 +273,9 @@ export async function generateReport(
     if (item.previousUnit) {
       diffItem.previous = {
         content: formatContent(item.previousUnit),
-        value: item.previousUnit.amountRaw ?? item.previousUnit.amount,
+        value:
+          item.previousUnit.amountRaw ??
+          item.previousUnit.amount,
         source: item.previousUnit.source,
       };
     }
@@ -192,7 +283,9 @@ export async function generateReport(
     if (item.currentUnit) {
       diffItem.current = {
         content: formatContent(item.currentUnit),
-        value: item.currentUnit.amountRaw ?? item.currentUnit.amount,
+        value:
+          item.currentUnit.amountRaw ??
+          item.currentUnit.amount,
         source: item.currentUnit.source,
       };
     }
